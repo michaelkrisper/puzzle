@@ -84,5 +84,6 @@ small machines; delete temporary Chrome profiles afterwards.
   `APP_VERSION` in `app.js` are placeholders the deploy stamps).
   `CHANGELOG.md` is frozen; release notes come from PR titles and tickets.
   Minor/major releases: Actions -> Release.
-- Merging to `main` deploys to GitHub Pages automatically.
+- Merging to `main` deploys to GitHub Pages and to
+  https://puzzle.krisperapps.de/ automatically.
 - Details: CONTRIBUTING.md.
