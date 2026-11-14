@@ -1,7 +1,7 @@
 # Changelog
 
 This file ends with 0.5.5. Later changes are listed in the
-[GitHub releases](https://github.com/michaelkrisper/puzzlehelfer/releases).
+[GitHub releases](https://github.com/michaelkrisper/puzzle/releases).
 
 ## 0.5.5 – 2026-11-07
 

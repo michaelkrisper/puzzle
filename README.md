@@ -1,18 +1,18 @@
 # Puzzlehelfer
 
-[![CI](https://github.com/michaelkrisper/puzzlehelfer/actions/workflows/ci.yml/badge.svg)](https://github.com/michaelkrisper/puzzlehelfer/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/github/v/tag/michaelkrisper/puzzlehelfer?sort=semver&label=version)](https://github.com/michaelkrisper/puzzlehelfer/releases)
+[![CI](https://github.com/michaelkrisper/puzzle/actions/workflows/ci.yml/badge.svg)](https://github.com/michaelkrisper/puzzle/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/github/v/tag/michaelkrisper/puzzle?sort=semver&label=version)](https://github.com/michaelkrisper/puzzle/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![PWA](https://img.shields.io/badge/PWA-works%20offline-5a0fc8)](https://michaelkrisper.github.io/puzzlehelfer/)
+[![PWA](https://img.shields.io/badge/PWA-works%20offline-5a0fc8)](https://michaelkrisper.github.io/puzzle/)
 [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A524-339933)](.nvmrc)
-[![Live demo](https://img.shields.io/badge/demo-GitHub%20Pages-222)](https://michaelkrisper.github.io/puzzlehelfer/)
+[![Live demo](https://img.shields.io/badge/demo-GitHub%20Pages-222)](https://michaelkrisper.github.io/puzzle/)
 
 Take a photo of jigsaw pieces and find out where they belong and which way
 round. The app compares every piece with the picture on the box and checks
 whether knobs, holes and straight edges fit. Everything runs in the browser;
 no photo leaves the device. The app's interface is in German.
 
-**→ [michaelkrisper.github.io/puzzlehelfer](https://michaelkrisper.github.io/puzzlehelfer/)**
+**→ [michaelkrisper.github.io/puzzle](https://michaelkrisper.github.io/puzzle/)**
 
 <p align="center">
   <img src="docs/screenshot.png" width="420" alt="Part of the result view: puzzle pieces on a wooden table, each with a number and a white curved arrow showing direction and degrees of rotation">
