@@ -147,6 +147,14 @@ h3 {
   color: var(--muted);
 }
 
+.legal {
+  font-size: 0.75rem;
+}
+
+.legal a {
+  color: inherit;
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;
