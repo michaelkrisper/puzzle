@@ -27,9 +27,11 @@ small machines; delete temporary Chrome profiles afterwards.
 
 ## Architecture
 
-- `index.html`, `app.js`, `style.css`: UI (German). Tabs "Vorlage" (reference
+- `index.html`, `app.js`, `style.css`: UI (German). Tabs "Puzzles" (the
+  stored puzzles: new, open, rename, delete), "Vorlage" (reference
   photo, corners, piece count, grid) and "Teile" (photos, step cards "Nach
   Lücke" / "Nach Teil" / "Suchliste", "Am Tisch" full-screen mode, sweep).
+  One puzzle is open; opening another reloads the page.
 - `worker.js`: owns OpenCV, the reference and all scene analyses; messages
   `reference`, `scene`, `solve`, `table`, ...; caches analyses and the last
   solve in IndexedDB.
@@ -41,7 +43,8 @@ small machines; delete temporary Chrome profiles afterwards.
   (finished part: registration, filled places, rims, islands, seam grid),
   `fit.js` (outline fit of a piece into a gap), `pipeline.js`
   (`analyzeScene` per photo, `solve` over all photos), `geom.js`, `stitch.js`
-  (photo overlap), `track.js` (sweep tracking).
+  (photo overlap), `track.js` (sweep tracking), `puzzles.js` (key layout of
+  the stored puzzles, list texts; no database access).
 - `sw.js`: offline cache named `puzzlehelfer-<version>`; cleanup only touches
   this prefix (the app used to share its origin with other apps).
 - `tools/`: `synth.py` (synthetic scenes with known truth), `eval.mjs`
@@ -67,7 +70,11 @@ small machines; delete temporary Chrome profiles afterwards.
   need fresh ones (piece indices then change).
 - `app.js` and `worker.js` both open IndexedDB `puzzlehelfer` at version 1;
   change both together. Cached analyses are keyed by app version, file,
-  reference/corners and grid.
+  reference/corners and grid. Everything of a puzzle is stored under
+  `<id>/...` (layout and migration: `core/puzzles.js`; the worker gets the
+  prefix with the reference).
+- A new file of the app goes into `FILES` in `sw.js` (offline cache); a new
+  folder also into the `cp` of the deploy in `.github/workflows/ci.yml`.
 - UI text German, plain and short; code, comments and docs English. Comments
   explain the non-obvious why, not the code. No new dependencies.
 - Biome formats Markdown too: `_emphasis_`, not `*emphasis*`.

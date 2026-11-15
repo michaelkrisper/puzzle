@@ -87,7 +87,7 @@ main {
   padding: 0.8rem 0.8rem calc(env(safe-area-inset-bottom) + 4.8rem);
 }
 
-/* Two tabs at the bottom like a native app: Vorlage and Teile. */
+/* Tabs at the bottom like a native app: Puzzles, Vorlage and Teile. */
 .tabbar {
   position: fixed;
   left: 0;
@@ -1006,4 +1006,88 @@ details.more summary {
   display: block;
   flex: 1 0 100%;
   font-size: 0.88rem;
+}
+
+/* List of the stored puzzles. */
+.storage-error {
+  color: var(--bad);
+}
+
+.puzzle-list {
+  list-style: none;
+  margin: 0.8rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.puzzle {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.puzzle.on {
+  border-color: var(--accent);
+}
+
+.puzzle-open {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  padding: 0.6rem;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.puzzle-pic {
+  flex: none;
+  width: 96px;
+  height: 72px;
+  border-radius: 8px;
+  background: #0b1016;
+  object-fit: cover;
+}
+
+.puzzle-open > span:last-child {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  font-size: 0.9rem;
+}
+
+.puzzle-open b {
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.puzzle-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  padding: 0 0.6rem 0.6rem;
+}
+
+.name-input {
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #0f1620;
+  color: var(--text);
+  font: inherit;
+}
+
+.btn.danger {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #3a0606;
+  font-weight: 600;
 }

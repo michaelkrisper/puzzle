@@ -5,7 +5,8 @@
  *
  *   node tests/e2e.mjs [URL] [output dir]
  * Without a URL, starts its own server on port 8794. E2E_PARTIAL=1 tests
- * a half-finished puzzle in the photo (arrows to the places).
+ * a half-finished puzzle in the photo (arrows to the places); without it the
+ * list of stored puzzles is tested too.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -107,6 +108,133 @@ async function setFile(selector, file) {
   const { root: doc } = await send('DOM.getDocument', { depth: -1 });
   const { nodeId } = await send('DOM.querySelector', { nodeId: doc.nodeId, selector });
   await send('DOM.setFileInputFiles', { nodeId, files: [file] });
+}
+
+// Opening another puzzle reloads the page.
+async function loaded(expr, what) {
+  await wait(500);
+  check(
+    await until(`document.readyState === 'complete' && typeof puzzles !== 'undefined' && (${expr})`),
+    what,
+  );
+}
+const listed = `PH.puzzles.sorted(puzzles).map((p) => p.name + ':' + p.count).join()`;
+const clickIn = (name, selector) =>
+  evaluate(`[...document.querySelectorAll('.puzzle')]
+    .find((li) => li.querySelector('b').textContent === ${JSON.stringify(name)})
+    .querySelector(${JSON.stringify(selector)}).click()`);
+
+// Several puzzles: a second one next to the one of the test above, both
+// there after a reload, open the first again, rename, delete, and the data of
+// the version before (one puzzle without a list).
+async function puzzlesTest() {
+  await evaluate(`document.getElementById('detail').close()`);
+  check(
+    await until(`puzzles.length === 1 && !!puzzles[0].thumb`),
+    'the puzzle is in the list, with a picture',
+  );
+  await evaluate(`document.getElementById('tab-list').click()`);
+  await shot('6-list-one');
+  await evaluate(`document.getElementById('puzzle-new').click()`);
+  await loaded(
+    `!puzzles.includes(puzzle) && !document.getElementById('ref-empty').hidden && !document.getElementById('step-ref').hidden`,
+    '"Neues Puzzle" starts with an empty reference',
+  );
+  await setFile('input[data-ref]:not([capture])', join(fx, 'scene.jpg'));
+  check(
+    await until(`!document.getElementById('ref-crop').hidden && !!state.refImg`),
+    'second reference loaded',
+  );
+  await evaluate(`document.getElementById('crop-full').click()`);
+  await evaluate(`document.getElementById('crop-ok').click()`);
+  await evaluate(`setCount(12)`);
+  check(
+    await until(`puzzles.length === 2 && !!puzzle.thumb && !!state.refView`, 90000),
+    'second puzzle stored',
+  );
+
+  await send('Page.reload');
+  await loaded(`!!state.refView`, 'reload: a puzzle opens');
+  check(
+    (await evaluate(listed)) === `Puzzle 2:12,Puzzle 1:${count}`,
+    `both puzzles listed, opened last first (${await evaluate(listed)})`,
+  );
+  check(await evaluate(`puzzle.id === 2 && state.count === 12`), 'the puzzle opened last is open');
+  await evaluate(`document.getElementById('tab-list').click()`);
+  check(
+    await until(
+      `[...document.querySelectorAll('.puzzle-pic')].every((i) => i.tagName === 'IMG' && i.naturalWidth > 0)`,
+    ),
+    'list shows both pictures',
+  );
+  await shot('6-list-two');
+
+  await clickIn('Puzzle 1', '.puzzle-open');
+  await loaded(`puzzle.id === 1 && !!state.refView && state.result !== null`, 'first puzzle opens again');
+  const size = readFileSync(join(fx, 'reference.jpg')).length;
+  check(
+    await evaluate(
+      `state.refBlob.size === ${size} && state.count === ${count} && state.scenes.length === 1 && !document.getElementById('step-scene').hidden`,
+    ),
+    'its reference picture, piece count and photo are back',
+  );
+  check(await evaluate(`state.result.stored === true`), 'its analysis and search came from the storage');
+
+  await evaluate(`document.getElementById('tab-list').click()`);
+  await clickIn('Puzzle 1', '.puzzle-tools button:first-child');
+  check(await evaluate(`document.getElementById('rename').open`), 'rename dialog opens');
+  await shot('6-rename');
+  await evaluate(`(() => {
+    document.getElementById('rename-name').value = '  Jäger im Schnee ';
+    document.querySelector('#rename button[value=ok]').click();
+  })()`);
+  check(await until(`${listed} === 'Jäger im Schnee:${count},Puzzle 2:12'`, 5000), 'renamed');
+
+  await clickIn('Puzzle 2', '.puzzle-tools button:last-child');
+  await shot('6-delete');
+  await evaluate(`document.querySelector('#delete button[value=cancel]').click()`);
+  await wait(300);
+  check(await evaluate(`puzzles.length === 2`), 'cancel keeps the puzzle');
+  await clickIn('Puzzle 2', '.puzzle-tools button:last-child');
+  await evaluate(`document.querySelector('#delete button[value=ok]').click()`);
+  check(
+    await until(`puzzles.length === 1 && document.querySelectorAll('.puzzle').length === 1`, 5000),
+    'deleted',
+  );
+  const keys = await evaluate(`loadAll(undefined, true).then((k) => k.join())`);
+  check(
+    !/(^|,)(2\/|puzzle:2)/.test(keys) && /(^|,)1\/ref/.test(keys) && /(^|,)1\/photo:1/.test(keys),
+    `only the data of the deleted puzzle is gone (${keys})`,
+  );
+
+  // As stored by the version before: the same keys without the puzzle's number.
+  await evaluate(`(async () => {
+    state.refBlob = null;
+    const keys = await loadAll(keyRange(PH.puzzles.dataSpan(1)), true);
+    await change((os) => {
+      for (const k of keys)
+        os.get(k).onsuccess = (e) => {
+          os.put(e.target.result, k.slice(2));
+          os.delete(k);
+        };
+      os.delete('puzzle:1');
+    });
+    localStorage.removeItem('ph-puzzle');
+  })()`);
+  await send('Page.reload');
+  await loaded(
+    `puzzles.length === 1 && !!state.refView && state.result !== null`,
+    'data of the version before opens',
+  );
+  check(
+    await evaluate(
+      `puzzle.name === 'Puzzle 1' && state.refBlob.size === ${size} && state.count === ${count} && state.scenes.length === 1`,
+    ),
+    'and is a puzzle of the list with its reference and photo',
+  );
+  check(await until(`!!puzzle.thumb`, 10000), 'with a picture for the list');
+  const left = await evaluate(`loadAll(undefined, true).then((k) => k.join())`);
+  check(!/(^|,)(ref|feat|round|solved|photo:|analysis:)/.test(left), `no old keys left (${left})`);
 }
 
 let ok = true;
@@ -272,6 +400,7 @@ try {
   })()`);
   check(await evaluate(`document.getElementById('detail').open`), 'detail view opens');
   await shot('5-detail');
+  if (!partial) await puzzlesTest();
   check(errors.length === 0, `no errors in the console ${errors.join(' | ')}`);
 } catch (err) {
   console.log('FAIL', err.message);

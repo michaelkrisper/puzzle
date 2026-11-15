@@ -132,8 +132,11 @@ async function request(mode, f) {
     }
   });
 }
-const stored = (sceneId) => request('readonly', (os) => os.get(`analysis:${sceneId}`));
-const keep = (sceneId, value) => request('readwrite', (os) => os.put(value, `analysis:${sceneId}`));
+// Start of the keys of the open puzzle (core/puzzles.js), sent with its
+// reference.
+let prefix = '';
+const stored = (sceneId) => request('readonly', (os) => os.get(`${prefix}analysis:${sceneId}`));
+const keep = (sceneId, value) => request('readwrite', (os) => os.put(value, `${prefix}analysis:${sceneId}`));
 // A copy without functions (feature matches carry one for the groups found
 // during the analysis), which cannot be stored.
 function plain(v, seen = new Map()) {
@@ -252,7 +255,8 @@ const handlers = {
   quad({ image }) {
     return { quad: PH.reference.findPictureQuad(cv, image) };
   },
-  reference({ image, quad, cols, rows, count, cache }) {
+  reference({ image, quad, cols, rows, count, cache, store = '' }) {
+    prefix = store;
     refQuad = quad;
     refCount = count;
     const prev = ref ?? cache;
@@ -347,13 +351,15 @@ const handlers = {
     const { ids, list, opts, key } = search(marks);
     let sugg = null;
     if (fromStore) {
-      const r = await request('readonly', (os) => os.get('solved'));
+      const r = await request('readonly', (os) => os.get(`${prefix}solved`));
       if (r?.key === key) sugg = Object.assign(r.list, { gaps: r.gaps });
     }
     const hit = !!sugg;
     if (!sugg) {
       sugg = PH.pipeline.solve(ref, list, { ...opts, progress: progressFor(id, solveStep) });
-      request('readwrite', (os) => os.put({ key, list: [...sugg], gaps: sugg.gaps ?? [] }, 'solved'));
+      request('readwrite', (os) =>
+        os.put({ key, list: [...sugg], gaps: sugg.gaps ?? [] }, `${prefix}solved`),
+      );
     }
     const { free, holes } = PH.pipeline.boardState(ref, list, opts.cells);
     return {
