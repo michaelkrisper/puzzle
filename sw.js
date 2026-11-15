@@ -2,9 +2,9 @@
 // VERSION is stamped with the release tag by CI on deploy
 // (tools/stamp-version.mjs), together with APP_VERSION in app.js (shown in the header).
 const VERSION = 'v0.5.5';
-// All apps on michaelkrisper.github.io share one origin and thus one
-// CacheStorage, so the cache name carries the app's prefix and cleanup only
-// touches this app's caches.
+// The cache name carries the app's prefix and cleanup only touches this
+// app's caches (the app used to share an origin, and thus one CacheStorage,
+// with other apps).
 const PREFIX = 'puzzlehelfer-';
 const CACHE = PREFIX + VERSION;
 const FILES = [

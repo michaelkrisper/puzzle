@@ -1,7 +1,7 @@
 name: CI
 
 # Checks every push and pull request (lint, unit and recognition tests,
-# browser test) and publishes main to GitHub Pages.
+# browser test) and publishes main to krisperapps.de.
 
 on:
   push:
@@ -60,21 +60,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  deploy:
-    name: GitHub Pages
+  site:
+    name: Assemble site
     # Only commits that got a version tag: a re-run of an older run deploys nothing.
     needs: [check, version]
     if: needs.version.outputs.version != ''
     runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    concurrency:
-      group: pages
-      cancel-in-progress: false
-    environment:
-      name: github-pages
-      url: ${{ steps.pages.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
       - name: Stamp version
@@ -83,17 +74,16 @@ jobs:
         run: |
           mkdir _site
           cp -r index.html style.css app.js worker.js sw.js manifest.webmanifest core icons vendor _site/
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
+          name: site
           path: _site
-      - id: pages
-        uses: actions/deploy-pages@v5
 
-  # The same files on the own server (https://puzzle.krisperapps.de/). The key may
+  # Publishes them to the own server (https://puzzle.krisperapps.de/). The key may
   # only write into this app's folder there; this job runs no code from the repo.
   server:
     name: krisperapps.de
-    needs: [deploy]
+    needs: [site]
     runs-on: ubuntu-latest
     concurrency:
       group: server
@@ -101,14 +91,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: github-pages
-          path: pages
+          name: site
+          path: _site
       - name: Upload
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
-          mkdir _site
-          tar -xf pages/artifact.tar -C _site
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
           chmod 600 ~/.ssh/deploy
