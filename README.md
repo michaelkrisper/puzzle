@@ -34,6 +34,8 @@ no photo leaves the device. The app's interface is in German.
   finished part
 - The round survives a reload or a closed tab: photos, analyses and marks
   are kept on the phone
+- Several puzzles side by side: each keeps its reference, photos and
+  progress on the device and can be opened again later ("Puzzles" tab)
 - Installable PWA that works offline
 
 ## Usage

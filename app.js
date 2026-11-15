@@ -109,7 +109,8 @@ async function store(key, value) {
     if (value === undefined) tx.objectStore('kv').delete(key);
     else tx.objectStore('kv').put(value, key);
     tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
+    // A full storage ends the transaction without a failed request.
+    tx.onabort = () => reject(tx.error);
   });
 }
 async function load(key) {
@@ -120,18 +121,259 @@ async function load(key) {
     r.onerror = () => reject(r.error);
   });
 }
-// The photos of the round, stored once each as the original file ('photo:'
-// up to the next character, ';').
-const PHOTOS = IDBKeyRange.bound('photo:', 'photo;', false, true);
-// Their analyses, stored by the worker (worker.js keep).
-const ANALYSES = IDBKeyRange.bound('analysis:', 'analysis;', false, true);
-async function photoKeys(range = PHOTOS) {
+const keyRange = ([from, to]) => IDBKeyRange.bound(from, to, false, true);
+async function loadAll(range, keysOnly = false) {
   const d = await db;
   return new Promise((resolve, reject) => {
-    const r = d.transaction('kv').objectStore('kv').getAllKeys(range);
+    const os = d.transaction('kv').objectStore('kv');
+    const r = keysOnly ? os.getAllKeys(range) : os.getAll(range);
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
   });
+}
+// Several changes that take effect together or not at all.
+async function change(f) {
+  const d = await db;
+  return new Promise((resolve, reject) => {
+    const tx = d.transaction('kv', 'readwrite');
+    f(tx.objectStore('kv'));
+    tx.oncomplete = resolve;
+    tx.onabort = () => reject(tx.error);
+  });
+}
+// Storing failed: a full storage is said in words on every tab.
+function storeFailed(err) {
+  console.warn(err);
+  if (!PH.puzzles.isQuota(err)) return;
+  $('storage-error').textContent = PH.puzzles.QUOTA;
+  show('storage-error', true);
+}
+
+// ---------- Puzzles ----------
+// Several puzzles are kept on the device (key layout: core/puzzles.js). One
+// is open; everything stored about it goes under K(...). Another one opens
+// by reloading the page: all of the app's state belongs to the open puzzle,
+// and its reference, analyses and marks come back from the database as after
+// any reload.
+const OPEN = 'ph-puzzle'; // localStorage: id of the open puzzle, or 'new'
+let puzzles = [];
+// Not in `puzzles` (and not stored) until it has a reference.
+let puzzle = null;
+const K = (key) => PH.puzzles.prefix(puzzle.id) + key;
+// The photos of the round, stored once each as the original file, and their
+// analyses, stored by the worker (worker.js keep).
+// ('photo:' up to the next character, ';').
+const photoKeys = (kind = 'photo') => loadAll(keyRange([K(`${kind}:`), K(`${kind};`)]), true);
+
+async function migrate() {
+  const plan = PH.puzzles.migration(
+    await loadAll(undefined, true),
+    (await loadAll(keyRange(PH.puzzles.META))).map((p) => p.id),
+  );
+  if (!plan) return;
+  const ref = plan.id ? await load('ref') : null;
+  await change((os) => {
+    for (const k of plan.drop ?? []) os.delete(k);
+    for (const [from, to] of plan.moves ?? []) {
+      os.get(from).onsuccess = (e) => {
+        os.put(e.target.result, to);
+        os.delete(from);
+      };
+    }
+    if (!ref) return;
+    const now = Date.now();
+    os.put(
+      {
+        id: plan.id,
+        name: PH.puzzles.defaultName(plan.id),
+        created: now,
+        opened: now,
+        count: ref.count,
+        cols: ref.cols,
+        rows: ref.rows,
+        thumb: null,
+      },
+      PH.puzzles.metaKey(plan.id),
+    );
+  });
+  if (plan.id) localStorage.setItem(OPEN, plan.id);
+}
+
+// Resolves once the open puzzle is known; nothing is stored before.
+const opened = (async () => {
+  await migrate().catch((err) => console.warn(err));
+  puzzles = await loadAll(keyRange(PH.puzzles.META)).catch(() => []);
+  const want = localStorage.getItem(OPEN);
+  puzzle = puzzles.find((p) => String(p.id) === want) ?? null;
+  if (puzzle) {
+    puzzle.opened = Date.now();
+    savePuzzle();
+  } else {
+    puzzle = {
+      id: PH.puzzles.nextId(puzzles.map((p) => p.id)),
+      name: '',
+      created: 0,
+      opened: 0,
+      thumb: null,
+    };
+    // Nothing open: the list, unless a new puzzle was asked for.
+    if (puzzles.length && want !== 'new') showTab('step-list');
+  }
+  renderPuzzles();
+})();
+
+function savePuzzle() {
+  return store(PH.puzzles.metaKey(puzzle.id), puzzle).catch(storeFailed);
+}
+
+// With the reference the puzzle gets its entry in the list.
+async function listPuzzle() {
+  Object.assign(puzzle, { count: state.count, cols: state.cols, rows: state.rows });
+  if (!puzzles.includes(puzzle)) {
+    puzzle.name = PH.puzzles.defaultName(puzzle.id);
+    puzzle.created = puzzle.opened = Date.now();
+    puzzles.push(puzzle);
+    localStorage.setItem(OPEN, puzzle.id);
+    // Without this the browser may delete the puzzles when space runs low.
+    navigator.storage?.persist?.().catch(() => {});
+  }
+  await savePuzzle();
+  renderPuzzles();
+}
+
+// The rectified picture, small, for the list.
+let thumbStale = false;
+async function makePuzzleThumb() {
+  if (!puzzles.includes(puzzle) || (puzzle.thumb && !thumbStale)) return;
+  const { view } = state.refView;
+  const c = document.createElement('canvas');
+  // Covers .puzzle img (96 × 72 px in style.css), three times as fine.
+  c.width = 288;
+  c.height = 216;
+  const k = Math.max(c.width / view.width, c.height / view.height);
+  const g = c.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(
+    view,
+    (c.width - view.width * k) / 2,
+    (c.height - view.height * k) / 2,
+    view.width * k,
+    view.height * k,
+  );
+  const blob = await new Promise((resolve) => c.toBlob(resolve, 'image/jpeg', 0.8));
+  if (!blob) return;
+  thumbStale = false;
+  puzzle.thumb = blob;
+  await savePuzzle();
+  renderPuzzles();
+}
+
+function renderPuzzles() {
+  const box = $('puzzle-list');
+  for (const img of box.querySelectorAll('img')) URL.revokeObjectURL(img.src);
+  box.replaceChildren();
+  for (const p of PH.puzzles.sorted(puzzles)) {
+    const li = document.createElement('li');
+    li.className = 'puzzle';
+    li.classList.toggle('on', p === puzzle);
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'puzzle-open';
+    const pic = document.createElement(p.thumb ? 'img' : 'span');
+    pic.className = 'puzzle-pic';
+    if (p.thumb) {
+      pic.src = URL.createObjectURL(p.thumb);
+      pic.alt = '';
+    }
+    const text = document.createElement('span');
+    const name = document.createElement('b');
+    name.textContent = p.name;
+    const sub = document.createElement('span');
+    sub.className = 'muted';
+    sub.textContent = [PH.puzzles.label(p), p === puzzle ? 'geöffnet' : ''].filter(Boolean).join(' · ');
+    text.append(name, sub);
+    open.append(pic, text);
+    open.addEventListener('click', () => openPuzzle(p));
+    const tools = document.createElement('span');
+    tools.className = 'puzzle-tools';
+    for (const [label, f] of [
+      ['Umbenennen', renamePuzzle],
+      ['Löschen', deletePuzzle],
+    ]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'mini wide';
+      b.textContent = label;
+      b.addEventListener('click', () => f(p));
+      tools.append(b);
+    }
+    li.append(open, tools);
+    box.append(li);
+  }
+  show('list-empty', !puzzles.length);
+  navigator.storage?.estimate?.().then(
+    ({ usage, quota }) => {
+      $('storage-info').textContent =
+        usage && quota ? `Belegt: ${PH.puzzles.size(usage)} von ${PH.puzzles.size(quota)}` : '';
+    },
+    () => {},
+  );
+}
+
+async function reopen(id) {
+  await saveRound();
+  localStorage.setItem(OPEN, id);
+  location.reload();
+}
+function openPuzzle(p) {
+  if (p === puzzle) showTab(state.refView ? 'step-scene' : 'step-ref');
+  else reopen(p.id);
+}
+$('puzzle-new').addEventListener('click', () => {
+  // The open one is new and still empty.
+  if (!puzzles.includes(puzzle)) showTab('step-ref');
+  else reopen('new');
+});
+
+// Answer of a dialog with the buttons "cancel" and "ok".
+function ask(id) {
+  const d = $(id);
+  d.returnValue = 'cancel';
+  // Not a submit button: Enter in a text field takes the form's first one.
+  d.querySelector('[value=cancel]').onclick = () => d.close('cancel');
+  d.showModal();
+  return new Promise((resolve) =>
+    d.addEventListener('close', () => resolve(d.returnValue === 'ok'), { once: true }),
+  );
+}
+async function renamePuzzle(p) {
+  $('rename-name').value = p.name;
+  if (!(await ask('rename'))) return;
+  p.name = PH.puzzles.cleanName($('rename-name').value, p.name);
+  await store(PH.puzzles.metaKey(p.id), p).catch(storeFailed);
+  renderPuzzles();
+}
+async function deletePuzzle(p) {
+  $('delete-text').textContent = `„${p.name}“ mit Vorlage, Fotos und Fortschritt löschen?`;
+  if (!(await ask('delete'))) return;
+  const open = p === puzzle;
+  if (open) {
+    // Nothing of it may be stored after this: no round on leaving the page
+    // (saveRound), no analysis by the worker.
+    state.refBlob = null;
+    worker.terminate();
+  }
+  await change((os) => {
+    os.delete(keyRange(PH.puzzles.dataSpan(p.id)));
+    os.delete(PH.puzzles.metaKey(p.id));
+  }).catch((err) => console.warn(err));
+  if (open) {
+    localStorage.removeItem(OPEN);
+    location.reload();
+    return;
+  }
+  puzzles = puzzles.filter((x) => x !== p);
+  renderPuzzles();
 }
 
 // ---------- Round (survives a reload) ----------
@@ -157,7 +399,7 @@ const splitKey = (k) => k.split(':').map(Number);
 
 function saveRound() {
   if (!state.refBlob) return;
-  store('round', {
+  return store(K('round'), {
     grid: [state.cols, state.rows],
     scenes: state.scenes.map((s) => ({ id: s.id, name: s.name, next: s.next })),
     marks: state.marks.map(withAt),
@@ -175,15 +417,15 @@ function saveRound() {
     tableChosen: state.tableChosen,
     crop: state.crop,
     current: state.current,
-  }).catch((err) => console.warn(err));
+  }).catch(storeFailed);
 }
 async function clearRound() {
-  await store('round', undefined);
-  const d = await db;
-  const os = d.transaction('kv', 'readwrite').objectStore('kv');
-  os.delete(PHOTOS);
-  os.delete(ANALYSES);
-  os.delete('solved');
+  await change((os) => {
+    os.delete(K('round'));
+    os.delete(keyRange([K('photo:'), K('photo;')]));
+    os.delete(keyRange([K('analysis:'), K('analysis;')]));
+    os.delete(K('solved'));
+  });
 }
 // After every tap on the results (skip, choices, marks: after the handlers),
 // and when switching to the camera app, where the tab may end.
@@ -194,19 +436,19 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', saveRound);
 
 async function restoreRound() {
-  const r = (await load('round')) ?? {};
+  const r = (await load(K('round'))) ?? {};
   const keys = new Set(await photoKeys());
   const scenes = [];
   for (const x of r.scenes ?? []) {
-    const file = keys.delete(`photo:${x.id}`) && (await load(`photo:${x.id}`));
+    const file = keys.delete(K(`photo:${x.id}`)) && (await load(K(`photo:${x.id}`)));
     if (file) scenes.push(newScene(x.id, file, x.name, x.next ?? []));
   }
   // Photos of a round that ended before it was stored, and analyses of
   // photos no longer in the round.
-  const stale = (await photoKeys(ANALYSES)).filter((k) => !scenes.some((s) => k === `analysis:${s.id}`));
-  const d = await db;
-  const os = d.transaction('kv', 'readwrite').objectStore('kv');
-  for (const k of [...keys, ...stale]) os.delete(k);
+  const stale = (await photoKeys('analysis')).filter((k) => !scenes.some((s) => k === K(`analysis:${s.id}`)));
+  await change((os) => {
+    for (const k of [...keys, ...stale]) os.delete(k);
+  });
   if (!scenes.length) return;
   const ids = new Set(scenes.map((s) => s.id));
   sceneSeq = Math.max(sceneSeq, ...ids) + 1;
@@ -414,6 +656,7 @@ for (const input of document.querySelectorAll('input[data-ref]')) {
     if (!file) return;
     show('ref-error', false);
     try {
+      await opened;
       await setReferenceFile(file);
     } catch (err) {
       console.error(err);
@@ -609,6 +852,7 @@ $('crop-full').addEventListener('click', () => {
 });
 $('crop-ok').addEventListener('click', async () => {
   state.quad = crop.quad.map((p) => [...p]);
+  thumbStale = true;
   if (!state.count) {
     askCount();
     return;
@@ -627,7 +871,8 @@ function quadAspect(q) {
 }
 
 async function saveRef() {
-  await store('ref', {
+  await listPuzzle();
+  await store(K('ref'), {
     blob: state.refBlob,
     quad: state.quad,
     count: state.count,
@@ -636,7 +881,7 @@ async function saveRef() {
     gridManual: state.gridManual,
     gridAuto: state.gridAuto,
     seamsDone: state.seamsDone,
-  });
+  }).catch(storeFailed);
 }
 
 // The grid is always based on the piece count (columns × rows follow from it
@@ -677,6 +922,7 @@ async function applyReference() {
   v.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(r.view.data), v.width, v.height), 0, 0);
   state.refView = { canvas: c, view: v, W: r.W, H: r.H, C: r.C };
   drawRefPreview();
+  makePuzzleThumb().catch((err) => console.warn(err));
   setStatus('');
   // New grid: re-analyse existing photos (piece numbers change, so pieces
   // marked as put in are forgotten). One sent after the new grid stays.
@@ -696,10 +942,11 @@ async function sendReference() {
     rows: state.rows,
     count: state.count,
     cache: state.featCache,
+    store: K(''),
   });
   if (r.cache) {
     state.featCache = r.cache;
-    store('feat', r.cache).catch((err) => console.warn(err));
+    store(K('feat'), r.cache).catch(storeFailed);
   }
   return r;
 }
@@ -1294,7 +1541,7 @@ function addScene(file, next = []) {
   const s = newScene(sceneSeq++, file, file.name, next);
   state.scenes.push(s);
   state.current = s.id;
-  store(`photo:${s.id}`, file).then(saveRound, (err) => console.warn(err));
+  store(K(`photo:${s.id}`), file).then(saveRound, storeFailed);
   renderThumbs();
   pump();
   return s;
@@ -1374,7 +1621,7 @@ async function analyze(s) {
     if (!r) return;
     if (!state.scenes.includes(s)) {
       jobStatus('Abgebrochen.');
-      store(`analysis:${s.id}`, undefined).catch((err) => console.warn(err));
+      store(K(`analysis:${s.id}`), undefined).catch((err) => console.warn(err));
       await call('removeScene', { sceneId: s.id });
       return;
     }
@@ -1683,8 +1930,8 @@ async function removeScene(id) {
   state.scenes = state.scenes.filter((x) => x.id !== id);
   state.marks = state.marks.filter((p) => p.sceneId !== id);
   if (state.current === id) state.current = state.scenes.at(-1)?.id ?? null;
-  store(`photo:${id}`, undefined).catch((err) => console.warn(err));
-  store(`analysis:${id}`, undefined).catch((err) => console.warn(err));
+  store(K(`photo:${id}`), undefined).catch((err) => console.warn(err));
+  store(K(`analysis:${id}`), undefined).catch((err) => console.warn(err));
   saveRound();
   // Not analysed yet: nothing in the worker or the result.
   if (s.busy) {
@@ -3786,9 +4033,12 @@ $('map-box').addEventListener('toggle', () => {
 // ---------- Start ----------
 (async () => {
   try {
+    await opened;
     state.attempts = (await load('attempts')) ?? [];
     await saveAttempts();
-    const saved = await load('ref');
+    // A new puzzle starts empty, whatever was left under its number.
+    if (!puzzles.includes(puzzle)) await change((os) => os.delete(keyRange(PH.puzzles.dataSpan(puzzle.id))));
+    const saved = await load(K('ref'));
     if (saved?.blob) {
       state.refBlob = saved.blob;
       state.refImg = await decode(saved.blob, REF_MAX);
@@ -3799,7 +4049,7 @@ $('map-box').addEventListener('toggle', () => {
       state.gridManual = saved.gridManual ?? false;
       state.gridAuto = saved.gridAuto ?? false;
       state.seamsDone = saved.seamsDone ?? false;
-      state.featCache = await load('feat');
+      state.featCache = await load(K('feat'));
       await applyReference();
       showTab('step-scene');
       // The photos and marks of the round before the reload.
