@@ -3,9 +3,9 @@
 Puzzlehelfer is an installable PWA that photographs jigsaw pieces and tells
 where each belongs and how to turn it. Vanilla JS, no build step, OpenCV.js
 (custom SIMD build in `vendor/`) in a web worker; everything runs on the
-device. Deployed to GitHub Pages from `main`. Target devices are phones
-(a low-RAM Android and a small iPhone): speed and memory matter more than on
-the desktop.
+device. Deployed to https://puzzle.krisperapps.de/ from `main`. Target devices
+are phones (a low-RAM Android and a small iPhone): speed and memory matter
+more than on the desktop.
 
 ## Commands
 
@@ -42,8 +42,8 @@ small machines; delete temporary Chrome profiles afterwards.
   `fit.js` (outline fit of a piece into a gap), `pipeline.js`
   (`analyzeScene` per photo, `solve` over all photos), `geom.js`, `stitch.js`
   (photo overlap), `track.js` (sweep tracking).
-- `sw.js`: offline cache named `puzzlehelfer-<version>`; other apps share the
-  origin, so cleanup only touches this prefix.
+- `sw.js`: offline cache named `puzzlehelfer-<version>`; cleanup only touches
+  this prefix (the app used to share its origin with other apps).
 - `tools/`: `synth.py` (synthetic scenes with known truth), `eval.mjs`
   (`loadCore`, `loadImage` for Node experiments), `bench.mjs`,
   `stamp-version.mjs` (deploy).
@@ -84,6 +84,5 @@ small machines; delete temporary Chrome profiles afterwards.
   `APP_VERSION` in `app.js` are placeholders the deploy stamps).
   `CHANGELOG.md` is frozen; release notes come from PR titles and tickets.
   Minor/major releases: Actions -> Release.
-- Merging to `main` deploys to GitHub Pages and to
-  https://puzzle.krisperapps.de/ automatically.
+- Merging to `main` deploys to https://puzzle.krisperapps.de/ automatically.
 - Details: CONTRIBUTING.md.
